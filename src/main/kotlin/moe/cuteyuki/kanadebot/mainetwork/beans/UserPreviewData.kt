@@ -2,7 +2,7 @@ package moe.cuteyuki.kanadebot.mainetwork.beans
 
 import com.alibaba.fastjson2.annotation.JSONField
 
-data class UserPreviewDataBean(
+data class UserPreviewData(
     @JSONField(name = "userId")
     val userId: Long,
 

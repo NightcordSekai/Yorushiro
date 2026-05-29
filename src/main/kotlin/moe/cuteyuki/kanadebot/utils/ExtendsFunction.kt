@@ -13,3 +13,13 @@ fun Bot.replyGroupMsg(event: GroupMessageEvent, msg: String){
         false
     )
 }
+
+fun Bot.replyGroupMsg(groupId: Long, msgId: Int, targetUID: Long, msg: String){
+    sendGroupMsg(groupId, MsgUtils.builder()
+        .reply(msgId)
+        .at(targetUID)
+        .text(" $msg")
+        .build(),
+        false
+    )
+}

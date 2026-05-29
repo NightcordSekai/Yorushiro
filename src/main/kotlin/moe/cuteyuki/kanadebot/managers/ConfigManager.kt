@@ -45,7 +45,7 @@ object ConfigManager {
         val expectedKeys = setOf(
             "deepSeekApiKey", "githubToken", "botAdmins",
             "keychipId", "aimeSalt", "aesIv", "aesKey",
-            "titleServerUrl", "aimeUrl", "packetSalt",
+            "titleServerUrl", "aimeUrl",
             "obfuscateParam", "apiVersion", "clientId",
             "regionId", "regionName", "placeId", "placeName"
         )
@@ -78,7 +78,6 @@ object ConfigManager {
             aesKey = json.getString("aesKey") ?: "",
             titleServerUrl = rawUrl,
             aimeUrl = json.getString("aimeUrl") ?: "",
-            packetSalt = json.getString("packetSalt") ?: "",
             obfuscateParam = json.getString("obfuscateParam") ?: "LatuAa81",
             apiVersion = json.getString("apiVersion") ?: "1.53",
             clientId = json.getString("clientId") ?: "",
@@ -114,7 +113,6 @@ object ConfigManager {
         json["aesKey"] = config.aesKey
         json["titleServerUrl"] = config.titleServerUrl
         json["aimeUrl"] = config.aimeUrl
-        json["packetSalt"] = config.packetSalt
         json["obfuscateParam"] = config.obfuscateParam
         json["apiVersion"] = config.apiVersion
         json["clientId"] = config.clientId

@@ -13,13 +13,12 @@ import kotlinx.coroutines.launch
 import moe.cuteyuki.kanadebot.command.CommandData
 import moe.cuteyuki.kanadebot.command.ICommand
 import moe.cuteyuki.kanadebot.mainetwork.NetworkManager
-import moe.cuteyuki.kanadebot.mainetwork.packet.GetUserRatingPacket
+import moe.cuteyuki.kanadebot.mainetwork.packet.UserRatingPacket
 import moe.cuteyuki.kanadebot.mainetwork.packet.UserTokenAndIDPacket
 import moe.cuteyuki.kanadebot.managers.PendingLoginManager
 import moe.cuteyuki.kanadebot.utils.DeepSeekConnector
 import moe.cuteyuki.kanadebot.utils.Logger
 import moe.cuteyuki.kanadebot.utils.MusicDataProvider
-import moe.cuteyuki.kanadebot.utils.replyGroupMsg
 
 class EvaluateRatingCommand : ICommand {
     override val data: CommandData
@@ -96,7 +95,7 @@ class EvaluateRatingCommand : ICommand {
     ) {
         try {
             // ========== 2. 获取 Rating 数据 ==========
-            val ratingPacket = GetUserRatingPacket(targetUserId)
+            val ratingPacket = UserRatingPacket(targetUserId)
             val ratingResultStr = callApiSuspend("GetUserRatingApi", ratingPacket.toJson(), targetUserId)
             Logger.log(ratingResultStr, Logger.LogType.DEBUG)
 

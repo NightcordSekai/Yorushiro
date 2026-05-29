@@ -17,7 +17,13 @@ data class UserRatingData (
     var achievement: Int = 0,
 
     @JSONField(name = "musicId")
-    var musicId: Int = 0
+    var musicId: Int = 0,
+
+    @JSONField(name = "comboStatus")
+    var comboStatus: Int = 0,
+
+    @JSONField(name = "syncStatus")
+    var syncStatus: Int = 0
 ){
     fun formatRatingSimple(raw: Long): String {
         val v = raw / 10000.0

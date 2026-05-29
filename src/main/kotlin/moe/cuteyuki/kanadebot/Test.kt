@@ -3,9 +3,9 @@ package moe.cuteyuki.kanadebot
 import moe.cuteyuki.kanadebot.mainetwork.beans.MusicLevel
 import moe.cuteyuki.kanadebot.mainetwork.beans.UserRatingData
 import moe.cuteyuki.kanadebot.managers.ResourceManager
+import moe.cuteyuki.kanadebot.utils.DesignSystem
 import moe.cuteyuki.kanadebot.utils.ImageBuilder
 import java.awt.Color
-import java.awt.Font
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.File
@@ -35,11 +35,11 @@ fun main() {
 
     // 用户名
     g2d.color = Color(61, 61, 61)
-    g2d.font = Font("MiSans-Bold", Font.PLAIN, 48)
+    g2d.font = DesignSystem.miSansBold(48)
     g2d.drawString(userName, 260, 175)
 
     // B35 + B15 = total
-    g2d.font = Font("MiSans-Regular", Font.PLAIN, 24)
+    g2d.font = DesignSystem.miSansRegular(24)
     g2d.drawString("B35:9289 + B15:3869 = 13158", 260, 215)
 
     // 底部二维码和文字
@@ -71,7 +71,9 @@ fun main() {
                 musicName = "Freak Out Hr.",
                 level = MusicLevel.Expert,
                 achievement = 1010000,
-                musicId = 11700
+                musicId = 11700,
+                syncStatus = 2,
+                comboStatus = 4
             ),
             x,
             y

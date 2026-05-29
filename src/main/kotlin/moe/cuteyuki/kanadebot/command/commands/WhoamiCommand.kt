@@ -20,14 +20,6 @@ import moe.cuteyuki.kanadebot.managers.PendingLoginManager
 import moe.cuteyuki.kanadebot.managers.ResourceManager
 import moe.cuteyuki.kanadebot.utils.Logger
 
-private val TICKET_MAP = mapOf(
-    1 to "功能票",
-    2 to "6倍功能票",
-    3 to "3倍功能票",
-    4 to "自由模式票",
-    5 to "段位认定票"
-)
-
 class WhoamiCommand: ICommand {
     override val data: CommandData
         get() = CommandData(
@@ -85,7 +77,6 @@ class WhoamiCommand: ICommand {
                 val token = packetResult.second
                 val cfg = ConfigManager.getConfig()
 
-                // 完整流程: login → get_preview → get_all_user_info → logout
                 completeWhoamiFlow(bot, qqUserId, groupId, messageId, targetUserId, token, cfg)
 
             } catch (e: Exception) {
@@ -105,24 +96,17 @@ class WhoamiCommand: ICommand {
     ) {
 
         try {
-            // ========== 1. GetUserPreviewApi ==========
             val previewPacket = UserPreviewPacket(targetUserId, "", token, cfg.clientId)
             val previewResultStr = callApiSuspend("GetUserPreviewApi", previewPacket.toJson(), targetUserId)
             Logger.log(previewResultStr, Logger.LogType.INFO)
-            val userPreviewData = JSON.parseObject(previewResultStr, UserPreviewDataBean::class.java)
+            val userPreviewData = JSON.parseObject(previewResultStr, UserPreviewData::class.java)
 
-            // ========== 3. GetUserChargeApi ==========
-            val chargePacket = UserChargePacket(targetUserId)
-            val chargeResultStr = callApiSuspend("GetUserChargeApi", chargePacket.toJson(), targetUserId)
-            val userChargeData = JSON.parseObject(chargeResultStr, UserChargeData::class.java)
 
-            // ========== 4. 构建消息 ==========
             val msgBuilder = MsgUtils.builder()
                 .reply(messageId)
                 .at(qqUserId)
                 .text(" ✅ 获取成功 下面是你当前的用户信息\n")
 
-            // GetUserPreviewApi
             if (userPreviewData != null) {
                 val iconBase64 = ResourceManager.iconImageBase64(userPreviewData.iconId.toString())
                 if (iconBase64 != null) {
@@ -137,20 +121,6 @@ class WhoamiCommand: ICommand {
                 msgBuilder.text(" - 账号最后登录时间(lastLoginDate): ${userPreviewData.lastLoginDate}\n")
             } else {
                 msgBuilder.text("❌ 获取用户基本信息失败\n")
-            }
-
-            // GetUserChargeApi
-            if (userChargeData != null) {
-                val chargeList = userChargeData.userChargeList
-                if (!chargeList.isNullOrEmpty()) {
-                    msgBuilder.text("\n🎫 功能票\n")
-                    for ((index, item) in chargeList.withIndex()) {
-                        val tname = TICKET_MAP.getOrDefault(item.chargeId, "票${item.chargeId}")
-                        msgBuilder.text("  [${index + 1}] $tname (ID:${item.chargeId}) | 剩余:${item.stock} | 有效期:${item.validDate}\n")
-                    }
-                } else {
-                    msgBuilder.text("\n🎫 功能票: 无\n")
-                }
             }
 
             bot.sendGroupMsg(groupId, msgBuilder.build(), false)

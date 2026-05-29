@@ -4,7 +4,6 @@ import moe.cuteyuki.kanadebot.mainetwork.beans.MusicLevel.*
 import moe.cuteyuki.kanadebot.mainetwork.beans.UserRatingData
 import moe.cuteyuki.kanadebot.managers.ResourceManager
 import java.awt.Color
-import java.awt.Font
 import java.awt.Graphics2D
 import java.awt.geom.RoundRectangle2D
 import javax.imageio.ImageIO
@@ -12,6 +11,21 @@ import kotlin.Array
 import kotlin.Int
 
 object ImageBuilder {
+
+    private val comboImageNames = mapOf(
+        1 to "UI_CHR_PlayBonus_FC",
+        2 to "UI_CHR_PlayBonus_FCp",
+        3 to "UI_CHR_PlayBonus_AP",
+        4 to "UI_CHR_PlayBonus_APp"
+    )
+
+    private val syncImageNames = mapOf(
+        1 to "UI_CHR_PlayBonus_FS",
+        2 to "UI_CHR_PlayBonus_FSp",
+        3 to "UI_CHR_PlayBonus_FSD",
+        4 to "UI_CHR_PlayBonus_FSDp"
+    )
+
     fun drawRatingCard(g2d: Graphics2D, data: UserRatingData, x: Int, y: Int){
         g2d.color = Color(237, 234, 255)
         g2d.fillRoundRect(x, y, 300, 100, 60, 60)
@@ -41,14 +55,28 @@ object ImageBuilder {
 
         g2d.clip = oldClip
 
+        // draw combo/sync badges on jacket bottom
+        if (data.comboStatus > 0) {
+            comboImageNames[data.comboStatus]?.let { name ->
+                val img = ImageIO.read(object {}::javaClass.get().getResourceAsStream("/$name.png"))
+                g2d.drawImage(img, x + 148, y + 66, 32, 32, null)
+            }
+        }
+        if (data.syncStatus > 0) {
+            syncImageNames[data.syncStatus]?.let { name ->
+                val img = ImageIO.read(object {}::javaClass.get().getResourceAsStream("/$name.png"))
+                g2d.drawImage(img, x + 178, y + 66, 32, 32, null)
+            }
+        }
+
         //draw music name & ach
         g2d.color = Color(61, 61, 61)
-        g2d.font = Font("MiSans-Regular", Font.PLAIN, 16)
+        g2d.font = DesignSystem.miSansRegular(16)
         if(data.musicName!!.length > 10){
             data.musicName = data.musicName!!.substring(0,10)+"..."
         }
         g2d.drawString(data.musicName, x + 100, y + 36)
-        g2d.font = Font("MiSans-Bold", Font.PLAIN, 26)
+        g2d.font = DesignSystem.miSansBold(26)
         g2d.drawString(data.formatRatingSimple(data.achievement.toLong()), x+ 100, y + 65)
 
         //draw dx
@@ -85,7 +113,7 @@ object ImageBuilder {
        // g2d.color = Color(208, 200, 255)
         g2d.fillRoundRect(x+225, y+70, 68, 26, 30, 90)
         g2d.color = Color(61, 61, 61)
-        g2d.font = Font("MiSans-Regular", Font.PLAIN, 12)
+        g2d.font = DesignSystem.miSansRegular(12)
         g2d.drawString("RA ${result.ra}", x+237, y+87)
     }
 }

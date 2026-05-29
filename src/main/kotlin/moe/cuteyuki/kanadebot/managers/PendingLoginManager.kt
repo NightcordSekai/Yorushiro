@@ -96,4 +96,14 @@ object PendingLoginManager {
     fun hasPending(userId: Long): Boolean {
         return pendingMap.containsKey(userId)
     }
+
+    /**
+     * 获取当前活跃的 Bot 实例。
+     * 用于长时间异步任务结束时，确保使用的是当前仍然活跃的 WebSocket 连接。
+     * @return 活跃的 Bot 实例，如果未初始化或无活跃连接则返回 null
+     */
+    fun getActiveBot(): Bot? {
+        if (!::botContainer.isInitialized) return null
+        return botContainer.robots.values.firstOrNull()
+    }
 }
