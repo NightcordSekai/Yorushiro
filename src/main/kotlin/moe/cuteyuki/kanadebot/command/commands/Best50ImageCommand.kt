@@ -87,16 +87,19 @@ class Best50ImageCommand: ICommand {
 
     /**
      * 扫码回调 — 在独立线程上执行。
-     * 注意: 该方法在后台线程中调用，总耗时可能超过 60 秒（含 Thread.sleep）。
-     * 发送消息前通过 PendingLoginManager.getActiveBot() 获取最新的活跃 Bot 实例，
-     * 避免因 WebSocket 重连导致 Bot 引用过期从而消息发送失败。
+     *
+     * 流程: QR 解析 → PreviewPacket → 根据 isLogin 分支:
+     *   isLogin == 1 → GetUserRatingApi → 生成图片 (Less Data，已有他人登录)
+     *   isLogin != 1 → UserLoginApi → 60s → GetUserRatingApi + GetUserMusicApi
+     *                 → 丰富数据 → UserLogout → 生成图片 (Full Data)
+     *
+     * LoginPacket 参照 rapollo: loginDateTime 使用 Unix 秒，携带 cookie 转发后续请求。
      */
     private fun handleQrCallback(bot: Bot, qqUserId: Long, groupId: Long, messageId: Int, qrToken: String) {
-        // 在长时间异步任务结束后，重新获取活跃的 Bot 实例以确保 WebSocket 连接有效
         fun resolveBot(): Bot = PendingLoginManager.getActiveBot() ?: bot
 
         try {
-            // 解析 token
+            // 解析 QR token
             val packetResult = UserTokenAndIDPacket(qrToken).execute()
             if (packetResult.first < 10000000) {
                 resolveBot().sendPrivateMsg(qqUserId, "❌ 无效的QrCode Token. 错误代码：${packetResult.first}", false)
@@ -106,35 +109,32 @@ class Best50ImageCommand: ICommand {
             val token = packetResult.second
             val cfg = ConfigManager.getConfig()
 
-            // 获取用户信息
+            // Preview — 获取用户基本信息 (userName / iconId / playerRating / isLogin)
             val previewPacket = UserPreviewPacket(targetUserId, "", token, cfg.clientId)
             val previewResultStr = callApiBlocking("GetUserPreviewApi", previewPacket.toJson(), targetUserId)
             Logger.log(previewResultStr, Logger.LogType.INFO)
-            val userPreviewData = JSON.parseObject(
-                previewResultStr,
-                UserPreviewData::class.java
-            )
+            val preview = JSON.parseObject(previewResultStr, UserPreviewData::class.java)
 
+            if (preview.isLogin == 1) {
+                // Less Data: 已有他人登录，仅获取 rating 数据
+                resolveBot().replyGroupMsg(groupId, messageId, qqUserId,
+                    "⚠ 你的账号已被登录，将使用 GetUserRatingApi 数据进行更新。")
 
-            if (userPreviewData.isLogin == 1) {
-                // 获取 rating对象曲目
                 val ratingPacket = UserRatingPacket(targetUserId)
                 val ratingResultStr = callApiBlocking("GetUserRatingApi", ratingPacket.toJson(), targetUserId)
                 Logger.log(ratingResultStr, Logger.LogType.DEBUG)
                 val ratingJson = JSON.parseObject(ratingResultStr)
-                resolveBot().replyGroupMsg(groupId, messageId, qqUserId, "⚠ 你的账号已被登录，将使用GetUserRatingApi返回的数据进行更新。")
-                // 缓存
+
                 val cacheJson = JSONObject().apply {
-                    put("userId", userPreviewData.userId)
-                    put("userName", userPreviewData.userName)
-                    put("iconId", userPreviewData.iconId)
-                    put("playerRating", userPreviewData.playerRating)
+                    put("userId", preview.userId)
+                    put("userName", preview.userName)
+                    put("iconId", preview.iconId)
+                    put("playerRating", preview.playerRating)
                     put("userRating", ratingJson.getJSONObject("userRating"))
                 }
                 File(ResourceManager.dataCacheFolder, "${qqUserId}_b50.json")
                     .writeText(cacheJson.toJSONString())
 
-                // 生成图片
                 val outputFile = File(ResourceManager.dataCacheFolder, "${qqUserId}_b50.png")
                 generateB50Image(cacheJson, outputFile)
 
@@ -143,9 +143,8 @@ class Best50ImageCommand: ICommand {
                     false
                 )
             } else {
-                // 未登录 → 先尝试登录
-                Thread.sleep(500)
-                val loginDateTime = System.currentTimeMillis()
+                // Full Data: 未登录 → 登录 → 60s 等待 → rating + 音乐数据
+                val loginDateTime = System.currentTimeMillis() / 1000  // Unix 秒 (参照 rapollo)
                 val loginPacket = UserLoginPacket(
                     userId = targetUserId,
                     regionId = cfg.regionId,
@@ -156,105 +155,100 @@ class Best50ImageCommand: ICommand {
                     token = token,
                 )
 
-                val loginResult = JSON.parseObject(
-                    callApiBlocking("UserLoginApi", loginPacket.toJson(), targetUserId),
-                    UserLoginData::class.java
+                val loginResponse = callApiBlockingWithCookie("UserLoginApi", loginPacket.toJson(), targetUserId)
+                val loginCookie = loginResponse.cookieHeader
+                val loginResult = JSON.parseObject(loginResponse.body, UserLoginData::class.java)
+
+                if (loginResult.returnCode != 1) {
+                    resolveBot().replyGroupMsg(groupId, messageId, qqUserId,
+                        "⚠ UserLoginApi 失败 (returnCode=${loginResult.returnCode})")
+                    return
+                }
+
+                // 等待 60 秒后拉取数据
+                Thread.sleep(60000)
+
+                val ratingPacket = UserRatingPacket(targetUserId)
+                val ratingResultStr = callApiBlocking("GetUserRatingApi", ratingPacket.toJson(), targetUserId, loginCookie)
+                Logger.log(ratingResultStr, Logger.LogType.DEBUG)
+                val ratingJson = JSON.parseObject(ratingResultStr)
+                val userRatingObj = ratingJson.getJSONObject("userRating")
+                val ratingListArr = userRatingObj.getJSONArray("ratingList")
+                val newRatingListArr = userRatingObj.getJSONArray("newRatingList")
+
+                // 拉取完整音乐数据
+                val musicPacket = UserMusicDataPacket(targetUserId, maxCount = 50)
+                val musicData = JSON.parseObject(
+                    callApiBlocking("GetUserMusicApi", musicPacket.toJson(), targetUserId, loginCookie),
+                    UserMusicData::class.java
+                )
+                Thread.sleep(5000)
+
+                // UserLogout
+                callApiBlocking(
+                    "UserLogoutApi",
+                    UserLogoutPacket(
+                        userId = targetUserId,
+                        placeId = ConfigManager.getConfig().placeId,
+                        regionId = ConfigManager.getConfig().regionId,
+                        clientId = ConfigManager.getConfig().clientId,
+                        loginDateTime = loginDateTime
+                    ).toJson(),
+                    targetUserId,
+                    loginCookie
                 )
 
-                if (loginResult.returnCode == 1) {
-                    //delay 60s...
-                    Thread.sleep(60000)
-                    // 获取 rating对象曲目
-                    val ratingPacket = UserRatingPacket(targetUserId)
-                    val ratingResultStr = callApiBlocking("GetUserRatingApi", ratingPacket.toJson(), targetUserId)
-                    Logger.log(ratingResultStr, Logger.LogType.DEBUG)
-                    val ratingJson = JSON.parseObject(ratingResultStr)
-                    val userRatingObj = ratingJson.getJSONObject("userRating")
-                    val ratingListArr = userRatingObj.getJSONArray("ratingList")
-                    val newRatingListArr = userRatingObj.getJSONArray("newRatingList")
-
-                    // 收集 rating 中的 musicId，用于后续匹配
-                    val targetMusicIds = mutableSetOf<Int>()
-                    ratingListArr?.forEach { obj -> targetMusicIds.add((obj as JSONObject).getIntValue("musicId")) }
-                    newRatingListArr?.forEach { obj -> targetMusicIds.add((obj as JSONObject).getIntValue("musicId")) }
-
-                    // 拉取完整音乐数据
-                    val musicPacket = UserMusicDataPacket(targetUserId, maxCount = 50)
-                    val musicData = JSON.parseObject(
-                        callApiBlocking("GetUserMusicApi", musicPacket.toJson(), targetUserId),
-                        UserMusicData::class.java
-                    )
-                    Thread.sleep(5000)
-                    //User Logout
-                    callApiBlocking(
-                        "UserLogoutApi",
-                        UserLogoutPacket(
-                            userId = targetUserId,
-                            placeId = ConfigManager.getConfig().placeId,
-                            regionId = ConfigManager.getConfig().regionId,
-                            clientId = ConfigManager.getConfig().clientId,
-                            loginDateTime = loginDateTime
-                        ).toJson()
-                        ,targetUserId
-                    )
-
-                    // 构建 (musicId, level) → (achievement, comboStatus, syncStatus) 的查找表
-                    data class MusicDetailCache(val achievement: Int, val comboStatus: Int, val syncStatus: Int)
-                    val musicDetailMap = mutableMapOf<Pair<Int, Int>, MusicDetailCache>()
-                    musicData.userMusicList.forEach { music: UserMusic ->
-                        music.userMusicDetailList.forEach { detail ->
-                            musicDetailMap[detail.musicId to detail.level] = MusicDetailCache(
-                                detail.achievement, detail.comboStatus, detail.syncStatus
-                            )
-                        }
+                // (musicId, level) → (achievement, comboStatus, syncStatus) 查找表
+                data class MusicDetailCache(val achievement: Int, val comboStatus: Int, val syncStatus: Int)
+                val musicDetailMap = mutableMapOf<Pair<Int, Int>, MusicDetailCache>()
+                musicData.userMusicList.forEach { music: UserMusic ->
+                    music.userMusicDetailList.forEach { detail ->
+                        musicDetailMap[detail.musicId to detail.level] = MusicDetailCache(
+                            detail.achievement, detail.comboStatus, detail.syncStatus
+                        )
                     }
-
-                    // 用 GetUserMusicApi 的实际数据替换 ratingList 中的值
-                    fun enrichEntry(obj: JSONObject): JSONObject {
-                        val mid = obj.getIntValue("musicId")
-                        val lvl = obj.getIntValue("level")
-                        val cached = musicDetailMap[mid to lvl]
-                        return JSONObject().apply {
-                            put("musicId", mid)
-                            put("level", lvl)
-                            put("achievement", cached?.achievement ?: obj.getIntValue("achievement"))
-                            put("comboStatus", cached?.comboStatus ?: 0)
-                            put("syncStatus", cached?.syncStatus ?: 0)
-                        }
-                    }
-
-                    val enrichedRatingList = JSONArray()
-                    ratingListArr?.forEach { obj -> enrichedRatingList.add(enrichEntry(obj as JSONObject)) }
-
-                    val enrichedNewRatingList = JSONArray()
-                    newRatingListArr?.forEach { obj -> enrichedNewRatingList.add(enrichEntry(obj as JSONObject)) }
-
-                    // 构建缓存 JSON（格式与 ful 分支一致）
-                    val cacheJson = JSONObject().apply {
-                        put("userId", userPreviewData.userId)
-                        put("userName", userPreviewData.userName)
-                        put("iconId", userPreviewData.iconId)
-                        put("playerRating", userPreviewData.playerRating)
-                        put("userRating", JSONObject().apply {
-                            put("ratingList", enrichedRatingList)
-                            put("newRatingList", enrichedNewRatingList)
-                        })
-                    }
-                    File(ResourceManager.dataCacheFolder, "${qqUserId}_b50.json")
-                        .writeText(cacheJson.toJSONString())
-
-                    // 生成图片
-                    val outputFile = File(ResourceManager.dataCacheFolder, "${qqUserId}_b50.png")
-                    generateB50Image(cacheJson, outputFile)
-
-                    // 长时间异步任务（累计 65+ 秒）结束后，重新获取活跃的 Bot 实例
-                    resolveBot().sendGroupMsg(groupId,
-                        MsgUtils.builder().reply(messageId).img(outputFile.readBytes()).build(),
-                        false
-                    )
-                } else {
-                    resolveBot().replyGroupMsg(groupId, messageId, qqUserId, "⚠ 在调用UserLoginApi时失败。API返回代码：" + loginResult.returnCode)
                 }
+
+                // 用 GetUserMusicApi 实际数据替换 ratingList
+                fun enrichEntry(obj: JSONObject): JSONObject {
+                    val mid = obj.getIntValue("musicId")
+                    val lvl = obj.getIntValue("level")
+                    val cached = musicDetailMap[mid to lvl]
+                    return JSONObject().apply {
+                        put("musicId", mid)
+                        put("level", lvl)
+                        put("achievement", cached?.achievement ?: obj.getIntValue("achievement"))
+                        put("comboStatus", cached?.comboStatus ?: 0)
+                        put("syncStatus", cached?.syncStatus ?: 0)
+                    }
+                }
+
+                val enrichedRatingList = JSONArray()
+                ratingListArr?.forEach { obj -> enrichedRatingList.add(enrichEntry(obj as JSONObject)) }
+                val enrichedNewRatingList = JSONArray()
+                newRatingListArr?.forEach { obj -> enrichedNewRatingList.add(enrichEntry(obj as JSONObject)) }
+
+                // 使用 Preview 返回的用户基本信息
+                val cacheJson = JSONObject().apply {
+                    put("userId", preview.userId)
+                    put("userName", preview.userName)
+                    put("iconId", preview.iconId)
+                    put("playerRating", preview.playerRating)
+                    put("userRating", JSONObject().apply {
+                        put("ratingList", enrichedRatingList)
+                        put("newRatingList", enrichedNewRatingList)
+                    })
+                }
+                File(ResourceManager.dataCacheFolder, "${qqUserId}_b50.json")
+                    .writeText(cacheJson.toJSONString())
+
+                val outputFile = File(ResourceManager.dataCacheFolder, "${qqUserId}_b50.png")
+                generateB50Image(cacheJson, outputFile)
+
+                resolveBot().sendGroupMsg(groupId,
+                    MsgUtils.builder().reply(messageId).img(outputFile.readBytes()).build(),
+                    false
+                )
             }
 
         } catch (e: Exception) {
@@ -264,9 +258,17 @@ class Best50ImageCommand: ICommand {
         }
     }
 
-    private fun callApiBlocking(apiName: String, jsonBody: String, userId: Long): String {
+    /** 阻塞版 API 调用（可选携带 cookie）。 */
+    private fun callApiBlocking(apiName: String, jsonBody: String, userId: Long, cookie: String? = null): String {
         return kotlinx.coroutines.runBlocking {
-            NetworkManager.sendToTitleSuspend(jsonBody, apiName, userId)
+            NetworkManager.sendToTitleSuspend(jsonBody, apiName, userId, cookie)
+        }
+    }
+
+    /** 阻塞版 API 调用 — 返回完整 TitleResponse（含 cookie header），用于 UserLoginApi。 */
+    private fun callApiBlockingWithCookie(apiName: String, jsonBody: String, userId: Long): NetworkManager.TitleResponse {
+        return kotlinx.coroutines.runBlocking {
+            NetworkManager.sendToTitleWithCookieSuspend(jsonBody, apiName, userId)
         }
     }
 

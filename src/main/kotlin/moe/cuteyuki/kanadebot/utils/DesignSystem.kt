@@ -70,17 +70,17 @@ object DesignSystem {
     fun uiFont(style: Int, size: Float): Font =
         Font(uiFontFamily, style, size.toInt()).deriveFont(size)
 
-    private val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+    private val isMacOS = System.getProperty("os.name").lowercase().contains("mac")
 
-    /** MiSans Regular — 自动适配 Windows (MiSans Regular) 与其它系统 (MiSans-Regular)。 */
+    /** MiSans Regular — macOS 使用 "MiSans-Regular"，其它系统使用 "MiSans Regular"。 */
     @JvmStatic
     fun miSansRegular(size: Int): Font =
-        Font(if (isWindows) "MiSans Regular" else "MiSans-Regular", Font.PLAIN, size)
+        Font(if (isMacOS) "MiSans-Regular" else "MiSans Regular", Font.PLAIN, size)
 
-    /** MiSans Bold — 自动适配 Windows (MiSans Bold) 与其它系统 (MiSans-Bold)。 */
+    /** MiSans Bold — macOS 使用 "MiSans-Bold"，其它系统使用 "MiSans Bold"。 */
     @JvmStatic
     fun miSansBold(size: Int): Font =
-        Font(if (isWindows) "MiSans Bold" else "MiSans-Bold", Font.PLAIN, size)
+        Font(if (isMacOS) "MiSans-Bold" else "MiSans Bold", Font.PLAIN, size)
 
     // ---- Rendering ----
 
